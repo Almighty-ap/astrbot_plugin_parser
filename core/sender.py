@@ -34,6 +34,7 @@ from .exception import (
     ZeroSizeException,
 )
 from .render import Renderer
+from .utils import transcode_video_audio_to_lc
 
 
 class MessageSender:
@@ -216,6 +217,7 @@ class MessageSender:
 
             match cont:
                 case VideoContent() | DynamicContent():
+                    path = await transcode_video_audio_to_lc(path)
                     segs.append(self._video_from_path(path))
                 case AudioContent():
                     segs.append(
