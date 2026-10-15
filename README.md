@@ -62,10 +62,6 @@ _✨ 链接解析器 ✨_
 
 直接在astrbot的插件市场搜索astrbot_plugin_parser，点击安装，等待完成即可
 
-### 注意
-
-Astrbot 插件开发群：460973561（不点star不给进）
-
 ## ⚙️ 配置
 
 请在astrbot的插件配置面板查看并修改
@@ -159,3 +155,7 @@ nhentai 解析器作为可选模板提供，识别 `nhentai.net/g/<数字>` 形�
 ## 🎉 致谢
 
 本项目核心代码来自[nonebot-plugin-parser](https://github.com/fllesser/nonebot-plugin-parser)，请前往原仓库给作者点个Star!
+
+## 🤪 注意
+
+有问题想第一时间交流，可前往 Astrbot 插件开发群：460973561（不点star不给进）
