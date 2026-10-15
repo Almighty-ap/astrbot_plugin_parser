@@ -62,6 +62,10 @@ _✨ 链接解析器 ✨_
 
 直接在astrbot的插件市场搜索astrbot_plugin_parser，点击安装，等待完成即可
 
+### 注意
+
+Astrbot 插件开发群：460973561（不点star不给进）
+
 ## ⚙️ 配置
 
 请在astrbot的插件配置面板查看并修改
