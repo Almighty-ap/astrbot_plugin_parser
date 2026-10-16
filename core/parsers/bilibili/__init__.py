@@ -470,6 +470,7 @@ class BilibiliParser(BaseParser):
         dash_data = download_url_data.get("dash") or {}
         if not streams:
             raise DownloadException("未找到可下载的视频流（可能是所选编码无对应流）")
+        video_stream = streams[0]
         filter_pcdn = bool(getattr(self.mycfg, "block_pcdn", False))
         if isinstance(video_stream, MP4StreamDownloadURL):
             return _select_stream_url(video_stream, filter_pcdn), None
