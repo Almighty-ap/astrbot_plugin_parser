@@ -206,6 +206,12 @@
                             "AI修复"
                         ],
                         "default": "_720P"
+                    },
+                    "block_pcdn": {
+                        "description": "屏蔽 P/MCDN",
+                        "hint": "剔除B站返回的PCDN、MCDN节点链接，提升下载速度",
+                        "type": "bool",
+                        "default": false
                     }
                 }
             },

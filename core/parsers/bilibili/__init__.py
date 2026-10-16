@@ -1,6 +1,7 @@
 import asyncio
 from re import Match
 from typing import ClassVar
+from urllib.parse import urlparse
 
 from bilibili_api import request_settings, select_client
 from bilibili_api.opus import Opus
@@ -27,6 +28,36 @@ except Exception as e:
     raise ModuleNotFoundError(
         f"curl_cffi is required by bilibili parser but not installed: {e}"
     ) from e
+
+
+BLOCKED_PCDN_DOMAINS = (
+    "mcdn.bilivideo.com",
+    "mcdn.bilivideo.cn",
+    "szbdyd.com",
+    "mountaintoys.cn",
+    "nexusedgeio.com",
+    "ahdohpiechei.com",
+)
+
+
+def _is_pcdn_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        host = (urlparse(url).hostname or "").lower()
+        return any(host == d or host.endswith("." + d) for d in BLOCKED_PCDN_DOMAINS)
+    except Exception:
+        return False
+
+
+def _select_stream_url(stream, filter_pcdn: bool) -> str:
+    original_url = stream.url
+    if not filter_pcdn:
+        return original_url
+    backup_urls = getattr(stream, "backup_url", []) or []
+    all_urls = [original_url] + backup_urls
+    clean_urls = [u for u in all_urls if not _is_pcdn_url(u)]
+    return clean_urls[0] if clean_urls else original_url
 
 
 class BilibiliParser(BaseParser):
@@ -439,9 +470,9 @@ class BilibiliParser(BaseParser):
         dash_data = download_url_data.get("dash") or {}
         if not streams:
             raise DownloadException("未找到可下载的视频流（可能是所选编码无对应流）")
-        video_stream = streams[0]
+        filter_pcdn = bool(getattr(self.mycfg, "block_pcdn", False))
         if isinstance(video_stream, MP4StreamDownloadURL):
-            return video_stream.url, None
+            return _select_stream_url(video_stream, filter_pcdn), None
         if not isinstance(video_stream, VideoStreamDownloadURL):
             raise DownloadException("未找到可下载的视频流")
         logger.debug(
@@ -450,6 +481,8 @@ class BilibiliParser(BaseParser):
 
         audio_stream = streams[1] if len(streams) > 1 else None
         if not isinstance(audio_stream, AudioStreamDownloadURL):
-            return video_stream.url, None
+            return _select_stream_url(video_stream, filter_pcdn), None
         logger.debug(f"音频流质量: {audio_stream.audio_quality.name}")
-        return video_stream.url, audio_stream.url
+        return _select_stream_url(video_stream, filter_pcdn), _select_stream_url(
+            audio_stream, filter_pcdn
+        )
