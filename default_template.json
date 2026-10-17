@@ -5,7 +5,8 @@
     "use_proxy": false,
     "cookies": "",
     "video_codecs": "AVC",
-    "video_quality": "_720P"
+    "video_quality": "_720P",
+    "block_pcdn": false
   },
   {
     "__template_key": "douyin",
