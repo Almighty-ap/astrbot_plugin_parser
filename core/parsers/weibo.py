@@ -254,8 +254,10 @@ class WeiBoParser(BaseParser):
                     f"获取数据失败 content-type is not application/json (got: {ctype})"
                 )
 
-        # 用 bytes 更稳，避免编码歧义
-        weibo_data = msgspec.json.decode(await resp.read(), type=WeiboResponse).data
+            # 用 bytes 更稳，避免编码歧义；必须在响应上下文关闭前读取。
+            body = await resp.read()
+
+        weibo_data = msgspec.json.decode(body, type=WeiboResponse).data
 
         return self.build_weibo_data(weibo_data)
 
