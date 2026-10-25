@@ -735,6 +735,57 @@
                     }
                 }
             },
+            "jmcomic": {
+                "name": "JMComic 解析器",
+                "items": {
+                    "enable": {
+                        "description": "启用",
+                        "type": "bool",
+                        "default": true
+                    },
+                    "use_proxy": {
+                        "description": "使用代理",
+                        "type": "bool",
+                        "default": false
+                    },
+                    "image_send_mode": {
+                        "description": "漫画发送方式",
+                        "type": "string",
+                        "default": "pdf",
+                        "options": [
+                            "merge",
+                            "pdf",
+                            "ignore"
+                        ],
+                        "labels": [
+                            "合并发送",
+                            "发送PDF",
+                            "不发送"
+                        ]
+                    },
+                    "nsfw": {
+                        "description": "漫画封面处理方式",
+                        "type": "string",
+                        "options": [
+                            "send",
+                            "blur",
+                            "ignore"
+                        ],
+                        "labels": [
+                            "正常发送",
+                            "模糊处理后发送",
+                            "忽略"
+                        ],
+                        "default": "blur"
+                    },
+                    "max_page": {
+                        "description": "最大页数",
+                        "hint": "当前章节页数超过该值时跳过下载，仅发送信息卡片。0 则不限制",
+                        "type": "int",
+                        "default": 50
+                    }
+                }
+            },
             "allcpp": {
                 "name": "CPP无差别同人站解析器",
                 "items": {

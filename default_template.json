@@ -33,6 +33,14 @@
     "cookies": ""
   },
   {
+    "__template_key": "jmcomic",
+    "enable": true,
+    "use_proxy": false,
+    "image_send_mode": "pdf",
+    "nsfw": "blur",
+    "max_page": 50
+  },
+  {
     "__template_key": "xiaoheihe",
     "enable": true,
     "use_proxy": false,

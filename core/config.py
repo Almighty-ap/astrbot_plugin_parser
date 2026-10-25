@@ -171,6 +171,7 @@ class ParserItem(ConfigNode):
     delete_after_fetch: bool | None
     nsfw: str | None
     max_page: int | None
+    image_send_mode: str | None
     send_blue_links: bool | None
     qzone_credential_source: str | None
     snowluma_http_url: str | None
@@ -188,6 +189,7 @@ class ParserConfig(ConfigNodeContainer):
     bilibili: ParserItem
     douyin: ParserItem
     instagram: ParserItem
+    jmcomic: ParserItem
     kuaishou: ParserItem
     metube: ParserItem
     ncm: ParserItem
@@ -243,7 +245,6 @@ class PluginConfig(ConfigNode):
     parsers_template: list[dict[str, Any]]
 
     _plugin_name = "astrbot_plugin_parser"
-
     def __init__(self, config: AstrBotConfig, context: Context):
         super().__init__(config)
         self.context = context

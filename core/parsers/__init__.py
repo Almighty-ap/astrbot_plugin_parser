@@ -5,6 +5,7 @@ from .bilibili import BilibiliParser
 from .douyin import DouyinParser
 from .instagram import InstagramParser
 from .iwara import IwaraParser
+from .jmcomic import JMComicParser
 from .kuaishou import KuaiShouParser
 from .ncm import NCMParser
 from .nga import NGAParser
@@ -41,6 +42,7 @@ __all__ = [
     "YouTubeParser",
     "ZhihuParser",
     "IwaraParser",
+    "JMComicParser",
     "ShipinhaoParser",
     "PixivParser",
     "MetubeParser",
