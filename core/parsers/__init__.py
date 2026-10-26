@@ -4,12 +4,10 @@ from .base import BaseParser
 from .bilibili import BilibiliParser
 from .douyin import DouyinParser
 from .instagram import InstagramParser
-from .iwara import IwaraParser
-from .jmcomic import JMComicParser
 from .kuaishou import KuaiShouParser
+from .metube import MetubeParser
 from .ncm import NCMParser
 from .nga import NGAParser
-from .nhentai import NhentaiParser
 from .qzone import QZoneParser
 from .shipinhao import ShipinhaoParser
 from .tiktok import TikTokParser
@@ -19,8 +17,6 @@ from .xhs import XHSParser
 from .xiaoheihe import XiaoheiheParser
 from .youtube import YouTubeParser
 from .zhihu import ZhihuParser
-from .pixiv import PixivParser
-from .metube import MetubeParser
 
 __all__ = [
     "BaseParser",
@@ -32,7 +28,6 @@ __all__ = [
     "KuaiShouParser",
     "NCMParser",
     "NGAParser",
-    "NhentaiParser",
     "QZoneParser",
     "TikTokParser",
     "TwitterParser",
@@ -41,9 +36,6 @@ __all__ = [
     "XHSParser",
     "YouTubeParser",
     "ZhihuParser",
-    "IwaraParser",
-    "JMComicParser",
     "ShipinhaoParser",
-    "PixivParser",
     "MetubeParser",
 ]
