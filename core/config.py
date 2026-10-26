@@ -189,12 +189,10 @@ class ParserConfig(ConfigNodeContainer):
     bilibili: ParserItem
     douyin: ParserItem
     instagram: ParserItem
-    jmcomic: ParserItem
     kuaishou: ParserItem
     metube: ParserItem
     ncm: ParserItem
     nga: ParserItem
-    nhentai: ParserItem
     tiktok: ParserItem
     twitter: ParserItem
     weibo: ParserItem
@@ -202,9 +200,7 @@ class ParserConfig(ConfigNodeContainer):
     zhihu: ParserItem
     xhs: ParserItem
     youtube: ParserItem
-    iwara: ParserItem
     shipinhao: ParserItem
-    pixiv: ParserItem
     qzone: ParserItem
 
     def __init__(self, nodes: list[dict[str, Any]]):
