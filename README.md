@@ -137,6 +137,6 @@ _✨ 链接解析器 ✨_
 
 ## 🤪 注意
 
-有问题想第一时间交流，可前往 Astrbot 插件开发群：460973561（不点star不给进）
-如需更丰富的解析器，这里推荐一个另外维护的分支：https://github.com/huawubot/astrbot_plugin_parser
+- 有问题想第一时间交流，可前往 Astrbot 插件开发群：460973561（不点star不给进）
+- 如需更丰富的解析器，这里推荐一个另外维护的分支：https://github.com/huawubot/astrbot_plugin_parser
 
