@@ -3,6 +3,7 @@ from re import Match
 from typing import ClassVar
 from urllib.parse import urlparse
 
+from aiohttp import ClientError, ClientTimeout
 from bilibili_api import request_settings, select_client
 from bilibili_api.opus import Opus
 from bilibili_api.video import Video, VideoCodecs, VideoQuality
@@ -50,14 +51,38 @@ def _is_pcdn_url(url: str) -> bool:
         return False
 
 
-def _select_stream_url(stream, filter_pcdn: bool) -> str:
-    original_url = stream.url
-    if not filter_pcdn:
-        return original_url
-    backup_urls = getattr(stream, "backup_url", []) or []
-    all_urls = [original_url] + backup_urls
-    clean_urls = [u for u in all_urls if not _is_pcdn_url(u)]
-    return clean_urls[0] if clean_urls else original_url
+def _get_stream_urls(
+    stream, filter_pcdn: bool, backup_urls: list[str] | None = None
+) -> list[str]:
+    all_urls = [stream.url, *(getattr(stream, "backup_url", None) or [])]
+    all_urls.extend(backup_urls or [])
+    if filter_pcdn:
+        clean_urls = [url for url in all_urls if not _is_pcdn_url(url)]
+        if clean_urls:
+            all_urls = clean_urls
+
+    candidates: list[str] = []
+    for url in all_urls:
+        if not url:
+            continue
+        parts = urlparse(url)
+        host = parts.hostname or ""
+        if parts.scheme == "http" and (
+            host == "bilivideo.com" or host.endswith(".bilivideo.com")
+        ):
+            url = parts._replace(scheme="https").geturl()
+        if url not in candidates:
+            candidates.append(url)
+    return candidates
+
+
+def _get_backup_urls(stream, entries: list[dict]) -> list[str]:
+    return [
+        url
+        for entry in entries
+        if stream.url in (entry.get("base_url"), entry.get("baseUrl"), entry.get("url"))
+        for url in entry.get("backup_url") or entry.get("backupUrl") or []
+    ]
 
 
 class BilibiliParser(BaseParser):
@@ -106,7 +131,9 @@ class BilibiliParser(BaseParser):
     async def _parse_bv_bm(self, searched: Match[str]):
         bvid = searched.group("bvid")
         page = int(searched.group("page_num") or 1)
-        _, a_url = await self.extract_download_urls(bvid=bvid, page_index=page - 1)
+        _, a_url = await self.extract_download_urls(
+            bvid=bvid, page_index=page - 1, audio_only=True
+        )
         if not a_url:
             raise ParseException("未找到音频链接")
         audio = self.create_audio_content(a_url)
@@ -427,6 +454,37 @@ class BilibiliParser(BaseParser):
         else:
             raise ParseException("avid 和 bvid 至少指定一项")
 
+    async def _select_download_url(
+        self, stream, filter_pcdn: bool, backup_urls: list[str] | None = None
+    ) -> str:
+        """校验下载节点，失败时尝试 B 站返回的备用地址。"""
+        last_error: Exception | None = None
+        for url in _get_stream_urls(stream, filter_pcdn, backup_urls):
+            try:
+                async with self.session.get(
+                    url,
+                    headers={**self.headers, "Range": "bytes=0-0"},
+                    proxy=self.proxy,
+                    timeout=ClientTimeout(total=self.cfg.common_timeout),
+                ) as response:
+                    if response.status not in (200, 206):
+                        raise ClientError(f"HTTP {response.status}")
+                    if not await response.content.read(1):
+                        raise ClientError("Empty media response")
+                if url != stream.url:
+                    logger.info(
+                        f"B站下载切换备用节点 | host: {urlparse(url).hostname}"
+                    )
+                return url
+            except (ClientError, asyncio.TimeoutError) as exc:
+                last_error = exc
+                logger.warning(
+                    f"B站下载节点不可用 | host: {urlparse(url).hostname}, "
+                    f"error: {type(exc).__name__}"
+                )
+
+        raise DownloadException("B站媒体下载节点均不可用") from last_error
+
     async def extract_download_urls(
         self,
         video: Video | None = None,
@@ -434,6 +492,7 @@ class BilibiliParser(BaseParser):
         bvid: str | None = None,
         avid: int | None = None,
         page_index: int = 0,
+        audio_only: bool = False,
     ) -> tuple[str, str | None]:
         """解析视频下载链接
 
@@ -441,6 +500,7 @@ class BilibiliParser(BaseParser):
             bvid (str | None): bvid
             avid (int | None): avid
             page_index (int): 页索引 = 页码 - 1
+            audio_only (bool): 仅校验音频节点，供 bm 命令使用
         """
 
         from bilibili_api.video import (
@@ -467,23 +527,50 @@ class BilibiliParser(BaseParser):
             no_dolby_video=True,
             no_hdr=True,
         )
-        dash_data = download_url_data.get("dash") or {}
+        source = download_url_data.get("video_info") or download_url_data
+        dash_data = source.get("dash") or {}
         if not streams:
             raise DownloadException("未找到可下载的视频流（可能是所选编码无对应流）")
         video_stream = streams[0]
         filter_pcdn = bool(getattr(self.mycfg, "block_pcdn", False))
+        audio_stream = streams[1] if len(streams) > 1 else None
+        audio_entries = list(dash_data.get("audio") or [])
+        flac_audio = (dash_data.get("flac") or {}).get("audio")
+        if flac_audio:
+            audio_entries.append(flac_audio)
+        audio_entries.extend((dash_data.get("dolby") or {}).get("audio") or [])
+        audio_backups = (
+            _get_backup_urls(audio_stream, audio_entries)
+            if isinstance(audio_stream, AudioStreamDownloadURL)
+            else []
+        )
+        if audio_only:
+            video_url = getattr(video_stream, "url", "")
+            if not isinstance(audio_stream, AudioStreamDownloadURL):
+                return video_url, None
+            return video_url, await self._select_download_url(
+                audio_stream, filter_pcdn, audio_backups
+            )
         if isinstance(video_stream, MP4StreamDownloadURL):
-            return _select_stream_url(video_stream, filter_pcdn), None
+            return await self._select_download_url(
+                video_stream,
+                filter_pcdn,
+                _get_backup_urls(video_stream, source.get("durl") or []),
+            ), None
         if not isinstance(video_stream, VideoStreamDownloadURL):
             raise DownloadException("未找到可下载的视频流")
         logger.debug(
             f"视频流质量: {video_stream.video_quality.name}, 编码: {video_stream.video_codecs}"
         )
 
-        audio_stream = streams[1] if len(streams) > 1 else None
+        video_backups = _get_backup_urls(video_stream, dash_data.get("video") or [])
         if not isinstance(audio_stream, AudioStreamDownloadURL):
-            return _select_stream_url(video_stream, filter_pcdn), None
+            return await self._select_download_url(
+                video_stream, filter_pcdn, video_backups
+            ), None
         logger.debug(f"音频流质量: {audio_stream.audio_quality.name}")
-        return _select_stream_url(video_stream, filter_pcdn), _select_stream_url(
-            audio_stream, filter_pcdn
+        v_url, a_url = await asyncio.gather(
+            self._select_download_url(video_stream, filter_pcdn, video_backups),
+            self._select_download_url(audio_stream, filter_pcdn, audio_backups),
         )
+        return v_url, a_url
