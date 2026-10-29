@@ -222,6 +222,14 @@ class BilibiliCDNTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.extract(parser, [stream, None]), (BACKUP, None))
         self.assertEqual([url for url, _ in parser.session.calls], [PRIMARY, BACKUP])
 
+    async def test_upos_mirrorcosov_deprioritized_and_fallback_to_mirrorali(self):
+        cosov_url = "https://upos-sz-mirrorcosov.bilivideo.com/video.m4s"
+        ali_url = "https://upos-sz-mirrorali.bilivideo.com/video.m4s"
+        parser = self.parser({ali_url: Response(status=206)})
+        stream = self.video_stream(url=cosov_url)
+        self.assertEqual(await self.extract(parser, [stream, None]), (ali_url, None))
+        self.assertIn(ali_url, [url for url, _ in parser.session.calls])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,19 @@ BLOCKED_PCDN_DOMAINS = (
     "ahdohpiechei.com",
 )
 
+# 常见的稳定高可用 B 站 UPOS 镜像节点
+DEFAULT_UPOS_MIRRORS: tuple[str, ...] = (
+    "upos-sz-mirrorali.bilivideo.com",     # 阿里云国内
+    "upos-sz-mirrorcos.bilivideo.com",     # 腾讯云国内
+    "upos-sz-mirrorhw.bilivideo.com",      # 华为云国内
+    "upos-sz-mirroraliov.bilivideo.com",   # 阿里云海外
+)
+
+# 针对机房数据中心 IP 极易触发 HTTP 567 WAF 拦截或严重限速断流的已知问题节点
+BLOCKED_OR_PROBLEMATIC_UPOS: tuple[str, ...] = (
+    "upos-sz-mirrorcosov.bilivideo.com",   # 腾讯云海外，高频报 567
+)
+
 
 def _is_pcdn_url(url: str) -> bool:
     if not url:
@@ -61,19 +74,42 @@ def _get_stream_urls(
         if clean_urls:
             all_urls = clean_urls
 
-    candidates: list[str] = []
-    for url in all_urls:
+    # 若为 UPOS 节点，生成可靠的镜像降级节点以抵御海外 567 拦截或断流
+    upos_fallback_urls: list[str] = []
+    for raw_url in all_urls:
+        if not raw_url:
+            continue
+        parts = urlparse(raw_url)
+        host = (parts.hostname or "").lower()
+        if host.startswith("upos-") or host in BLOCKED_OR_PROBLEMATIC_UPOS:
+            for mirror in DEFAULT_UPOS_MIRRORS:
+                if mirror != host:
+                    fallback_url = parts._replace(netloc=mirror, scheme="https").geturl()
+                    if fallback_url not in upos_fallback_urls:
+                        upos_fallback_urls.append(fallback_url)
+
+    raw_candidates = all_urls + upos_fallback_urls
+    normal_candidates: list[str] = []
+    deprioritized_candidates: list[str] = []
+
+    for url in raw_candidates:
         if not url:
             continue
         parts = urlparse(url)
-        host = parts.hostname or ""
+        host = (parts.hostname or "").lower()
         if parts.scheme == "http" and (
             host == "bilivideo.com" or host.endswith(".bilivideo.com")
         ):
             url = parts._replace(scheme="https").geturl()
-        if url not in candidates:
-            candidates.append(url)
-    return candidates
+
+        if any(bad in host for bad in BLOCKED_OR_PROBLEMATIC_UPOS):
+            if url not in deprioritized_candidates:
+                deprioritized_candidates.append(url)
+        else:
+            if url not in normal_candidates:
+                normal_candidates.append(url)
+
+    return normal_candidates + deprioritized_candidates
 
 
 def _get_backup_urls(stream, entries: list[dict]) -> list[str]:
