@@ -40,18 +40,25 @@ BLOCKED_PCDN_DOMAINS = (
     "ahdohpiechei.com",
 )
 
-# 常见的稳定高可用 B 站 UPOS 镜像节点
+# 常见的稳定高可用 B 站 UPOS 镜像节点（首选阿里海外香港节点，亚太延迟低、带宽充沛）
 DEFAULT_UPOS_MIRRORS: tuple[str, ...] = (
+    "upos-sz-mirroraliov.bilivideo.com",   # 阿里云海外 (香港/亚太直连极速)
     "upos-sz-mirrorali.bilivideo.com",     # 阿里云国内
     "upos-sz-mirrorcos.bilivideo.com",     # 腾讯云国内
     "upos-sz-mirrorhw.bilivideo.com",      # 华为云国内
-    "upos-sz-mirroraliov.bilivideo.com",   # 阿里云海外
 )
 
-# 针对机房数据中心 IP 极易触发 HTTP 567 WAF 拦截或严重限速断流的已知问题节点
+# 针对机房数据中心 IP 极易触发 HTTP 567 WAF 拦截或严重限速中途掐断连接的已知问题节点
 BLOCKED_OR_PROBLEMATIC_UPOS: tuple[str, ...] = (
-    "upos-sz-mirrorcosov.bilivideo.com",   # 腾讯云海外，高频报 567
+    "upos-sz-mirrorcosov.bilivideo.com",   # 腾讯云海外，高频报 567 WAF
+    "mirrorcosov",
+    "mirrorakam",                                    # Akamai 节点，易中途掐断长流
+    "akamaized.net",
 )
+
+
+def _is_problematic_upos(host: str) -> bool:
+    return any(bad in host for bad in BLOCKED_OR_PROBLEMATIC_UPOS)
 
 
 def _is_pcdn_url(url: str) -> bool:
@@ -81,18 +88,18 @@ def _get_stream_urls(
             continue
         parts = urlparse(raw_url)
         host = (parts.hostname or "").lower()
-        if host.startswith("upos-") or host in BLOCKED_OR_PROBLEMATIC_UPOS:
+        if host.startswith("upos-") or "akamaized.net" in host or _is_problematic_upos(host):
             for mirror in DEFAULT_UPOS_MIRRORS:
                 if mirror != host:
                     fallback_url = parts._replace(netloc=mirror, scheme="https").geturl()
                     if fallback_url not in upos_fallback_urls:
                         upos_fallback_urls.append(fallback_url)
 
-    raw_candidates = all_urls + upos_fallback_urls
+    preferred_candidates: list[str] = []
     normal_candidates: list[str] = []
     deprioritized_candidates: list[str] = []
 
-    for url in raw_candidates:
+    for url in (upos_fallback_urls + all_urls):
         if not url:
             continue
         parts = urlparse(url)
@@ -102,14 +109,17 @@ def _get_stream_urls(
         ):
             url = parts._replace(scheme="https").geturl()
 
-        if any(bad in host for bad in BLOCKED_OR_PROBLEMATIC_UPOS):
+        if _is_problematic_upos(host):
             if url not in deprioritized_candidates:
                 deprioritized_candidates.append(url)
+        elif host in DEFAULT_UPOS_MIRRORS:
+            if url not in preferred_candidates:
+                preferred_candidates.append(url)
         else:
             if url not in normal_candidates:
                 normal_candidates.append(url)
 
-    return normal_candidates + deprioritized_candidates
+    return preferred_candidates + normal_candidates + deprioritized_candidates
 
 
 def _get_backup_urls(stream, entries: list[dict]) -> list[str]:
