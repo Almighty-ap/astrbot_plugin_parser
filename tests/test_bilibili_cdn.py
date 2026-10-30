@@ -222,21 +222,21 @@ class BilibiliCDNTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.extract(parser, [stream, None]), (BACKUP, None))
         self.assertEqual([url for url, _ in parser.session.calls], [PRIMARY, BACKUP])
 
-    async def test_upos_mirrorcosov_deprioritized_and_fallback_to_mirroraliov(self):
+    async def test_upos_mirrorcosov_deprioritized_and_fallback_to_mirrorcos(self):
         cosov_url = "https://upos-sz-mirrorcosov.bilivideo.com/video.m4s"
-        aliov_url = "https://upos-sz-mirroraliov.bilivideo.com/video.m4s"
-        parser = self.parser({aliov_url: Response(status=206)})
+        cos_url = "https://upos-sz-mirrorcos.bilivideo.com/video.m4s"
+        parser = self.parser({cos_url: Response(status=206)})
         stream = self.video_stream(url=cosov_url)
-        self.assertEqual(await self.extract(parser, [stream, None]), (aliov_url, None))
-        self.assertIn(aliov_url, [url for url, _ in parser.session.calls])
+        self.assertEqual(await self.extract(parser, [stream, None]), (cos_url, None))
+        self.assertIn(cos_url, [url for url, _ in parser.session.calls])
 
-    async def test_upos_akamai_deprioritized_and_fallback_to_mirroraliov(self):
+    async def test_upos_akamai_deprioritized_and_fallback_to_mirrorcos(self):
         akam_url = "https://upos-hz-mirrorakam.akamaized.net/video.m4s"
-        aliov_url = "https://upos-sz-mirroraliov.bilivideo.com/video.m4s"
-        parser = self.parser({aliov_url: Response(status=206)})
+        cos_url = "https://upos-sz-mirrorcos.bilivideo.com/video.m4s"
+        parser = self.parser({cos_url: Response(status=206)})
         stream = self.video_stream(url=akam_url)
-        self.assertEqual(await self.extract(parser, [stream, None]), (aliov_url, None))
-        self.assertIn(aliov_url, [url for url, _ in parser.session.calls])
+        self.assertEqual(await self.extract(parser, [stream, None]), (cos_url, None))
+        self.assertIn(cos_url, [url for url, _ in parser.session.calls])
 
 
 if __name__ == "__main__":

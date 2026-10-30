@@ -40,20 +40,22 @@ BLOCKED_PCDN_DOMAINS = (
     "ahdohpiechei.com",
 )
 
-# 常见的稳定高可用 B 站 UPOS 镜像节点（首选阿里海外香港节点，亚太延迟低、带宽充沛）
+# 常见的稳定高可用 B 站 UPOS 镜像节点（首选实测低延迟且高带宽的腾讯云与华为云节点）
 DEFAULT_UPOS_MIRRORS: tuple[str, ...] = (
-    "upos-sz-mirroraliov.bilivideo.com",   # 阿里云海外 (香港/亚太直连极速)
-    "upos-sz-mirrorali.bilivideo.com",     # 阿里云国内
-    "upos-sz-mirrorcos.bilivideo.com",     # 腾讯云国内
-    "upos-sz-mirrorhw.bilivideo.com",      # 华为云国内
+    "upos-sz-mirrorcos.bilivideo.com",     # 腾讯云国内 A 节点 (实测稳定 1s 内响应)
+    "upos-sz-mirrorcosb.bilivideo.com",    # 腾讯云国内 B 节点 (实测极速 0.7s 响应)
+    "upos-sz-mirrorhw.bilivideo.com",      # 华为云国内 (实测带宽达 2.0 MB/s)
+    "upos-sz-mirrorbos.bilivideo.com",     # 百度云国内节点 (备用)
 )
 
-# 针对机房数据中心 IP 极易触发 HTTP 567 WAF 拦截或严重限速中途掐断连接的已知问题节点
+# 针对机房数据中心 IP 极易触发 HTTP 567 WAF 拦截、断流掐断或路由黑洞的已知问题节点
 BLOCKED_OR_PROBLEMATIC_UPOS: tuple[str, ...] = (
     "upos-sz-mirrorcosov.bilivideo.com",   # 腾讯云海外，高频报 567 WAF
     "mirrorcosov",
-    "mirrorakam",                                    # Akamai 节点，易中途掐断长流
+    "mirrorakam",                          # Akamai 节点，易中途掐断长流
     "akamaized.net",
+    "mirroraliov",                         # 阿里云海外，部分地区路由黑洞超时
+    "upos-sz-mirrorali.bilivideo.com",     # 阿里云国内，数据中心网络间歇性超时
 )
 
 
@@ -505,13 +507,14 @@ class BilibiliParser(BaseParser):
     ) -> str:
         """校验下载节点，失败时尝试 B 站返回的备用地址。"""
         last_error: Exception | None = None
+        probe_timeout = min(float(getattr(self.cfg, "common_timeout", 15) or 15), 2.5)
         for url in _get_stream_urls(stream, filter_pcdn, backup_urls):
             try:
                 async with self.session.get(
                     url,
                     headers={**self.headers, "Range": "bytes=0-0"},
                     proxy=self.proxy,
-                    timeout=ClientTimeout(total=self.cfg.common_timeout),
+                    timeout=ClientTimeout(total=probe_timeout),
                 ) as response:
                     if response.status not in (200, 206):
                         raise ClientError(f"HTTP {response.status}")
