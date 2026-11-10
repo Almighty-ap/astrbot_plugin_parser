@@ -284,6 +284,8 @@ class Downloader:
             opts["cookiefile"] = str(cookiefile)
         if format:
             opts["format"] = format
+        # yt-dlp 默认仅启用 deno；容器内只有 node，缺失 JS 运行时会导致油管 n-sig 挑战求解失败
+        opts["js_runtimes"] = {"node": {}}
         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
             raw = await to_thread(ydl.extract_info, url, download=False)
             if not raw:
@@ -312,6 +314,8 @@ class Downloader:
             opts["cookiefile"] = str(cookiefile)
         if format:
             opts["format"] = format
+        # yt-dlp 默认仅启用 deno；容器内只有 node，缺失 JS 运行时会导致油管 n-sig 挑战求解失败
+        opts["js_runtimes"] = {"node": {}}
 
         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
             raw = await to_thread(ydl.extract_info, url, download=False)
