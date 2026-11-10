@@ -3,8 +3,10 @@ from collections.abc import Callable, Coroutine
 from functools import wraps
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
+from urllib.parse import urlsplit
 
 import aiofiles
+import yarl
 import yt_dlp
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from msgspec import Struct, convert
@@ -13,7 +15,7 @@ from tqdm.asyncio import tqdm
 from astrbot.api import logger
 
 from .config import PluginConfig
-from .constants import COMMON_HEADER
+from .constants import CDN_REFERER, COMMON_HEADER
 from .exception import (
     DownloadException,
     DurationLimitException,
@@ -62,6 +64,21 @@ class VideoInfo(Struct):
         return f"{self.channel}@{self.uploader}"
 
 
+def is_referer_block(exc: BaseException) -> bool:
+    """判断异常是否为防盗链拦截(401/403)"""
+    text = str(exc)
+    return "HTTP 401" in text or "HTTP 403" in text
+
+
+def cdn_referer(url: str) -> str | None:
+    """按目标 CDN 域名匹配兜底 Referer, 未命中返回 None"""
+    host = (urlsplit(url).hostname or "").lower()
+    for suffix, referer in CDN_REFERER.items():
+        if host == suffix or host.endswith(f".{suffix}"):
+            return referer
+    return None
+
+
 class Downloader:
     """下载器，支持youtube-dlp 和 流式下载"""
 
@@ -72,8 +89,10 @@ class Downloader:
         # 视频信息缓存
         self.info_cache: LimitedSizeDict[str, VideoInfo] = LimitedSizeDict()
         # 用于流式下载的客户端
+        # requote_redirect_url=False: 跳转目标保持原始百分号编码, 避免 CDN 签名被重编码破坏
         self.client = ClientSession(
-            timeout=ClientTimeout(total=self.cfg.download_timeout)
+            timeout=ClientTimeout(total=self.cfg.download_timeout),
+            requote_redirect_url=False,
         )
 
     async def close(self):
@@ -98,10 +117,14 @@ class Downloader:
             return file_path
         headers = headers or self.default_headers
         retries = self.cfg.download_retry_times
-        for attempt in range(retries + 1):
+        # 必须按原始编码请求: aiohttp 默认用 yarl 解析 URL, 会把查询串里的 %2F/%3D
+        # 等转义解开后重编码, 导致 CDN 签名失效(抖音图集等表现为 403)
+        request_url = yarl.URL(url, encoded=True)
+        # retries+1 次常规重试, 外加 1 次补 Referer 的防盗链兜底
+        for attempt in range(retries + 2):
             try:
                 async with self.client.get(
-                    url, headers=headers, allow_redirects=True, proxy=proxy
+                    request_url, headers=headers, allow_redirects=True, proxy=proxy
                 ) as response:
                     if response.status >= 400:
                         raise ClientError(f"HTTP {response.status} {response.reason}")
@@ -143,6 +166,15 @@ class Downloader:
                 raise
             except (ClientError, TimeoutError) as exc:
                 await safe_unlink(file_path)
+                # 防盗链 CDN 兜底: 未带 Referer 被拦时, 按域名补一个 Referer 再试一次
+                if (
+                    "Referer" not in headers
+                    and is_referer_block(exc)
+                    and (referer := cdn_referer(url))
+                ):
+                    headers = {**headers, "Referer": referer}
+                    logger.debug(f"补 Referer 重试 | url: {url} -> {referer}")
+                    continue
                 if attempt < retries:
                     await sleep(1 + attempt)
                     continue

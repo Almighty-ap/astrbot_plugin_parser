@@ -118,7 +118,10 @@ class BaseParser:
         """获取当前实例的 session，惰性创建"""
         if self._session is None or self._session.closed:
             self._session = ClientSession(
-                proxy=self.proxy, timeout=ClientTimeout(total=self.cfg.common_timeout)
+                proxy=self.proxy,
+                timeout=ClientTimeout(total=self.cfg.common_timeout),
+                # 跳转目标保持原始百分号编码, 避免签名类 URL 被重编码破坏
+                requote_redirect_url=False,
             )
         return self._session
 
