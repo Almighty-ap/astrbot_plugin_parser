@@ -42,10 +42,10 @@ BLOCKED_PCDN_DOMAINS = (
 
 # 常见的稳定高可用 B 站 UPOS 镜像节点（首选实测低延迟且高带宽的腾讯云与华为云节点）
 DEFAULT_UPOS_MIRRORS: tuple[str, ...] = (
-    "upos-sz-mirrorcos.bilivideo.com",     # 腾讯云国内 A 节点 (实测稳定 1s 内响应)
-    "upos-sz-mirrorcosb.bilivideo.com",    # 腾讯云国内 B 节点 (实测极速 0.7s 响应)
-    "upos-sz-mirrorhw.bilivideo.com",      # 华为云国内 (实测带宽达 2.0 MB/s)
-    "upos-sz-mirrorbos.bilivideo.com",     # 百度云国内节点 (备用)
+    "upos-sz-mirrorhw.bilivideo.com",       # 华为云国内 (2026-11-12 实测 12.35 MB/s)
+    "upos-sz-mirrorbos.bilivideo.com",      # 百度云国内 (2026-11-12 实测 3.94 MB/s)
+    "upos-sz-mirrorcos.bilivideo.com",      # 腾讯云国内 A (2026-11-12 实测 0.48 MB/s)
+    "upos-sz-mirrorcosb.bilivideo.com",     # 腾讯云国内 B (2026-11-12 实测 0.24 MB/s)
 )
 
 # 针对机房数据中心 IP 极易触发 HTTP 567 WAF 拦截、断流掐断或路由黑洞的已知问题节点
