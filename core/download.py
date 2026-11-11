@@ -28,6 +28,11 @@ from .utils import LimitedSizeDict, generate_file_name, merge_av, safe_unlink
 P = ParamSpec("P")
 T = TypeVar("T")
 
+# 断点续传参数
+_MAX_ATTEMPTS = 40  # 单次 streamd 的最大请求次数(含续传), 防止无限重试
+_SOCK_CONNECT_TIMEOUT = 30  # 建连超时(秒)
+_SOCK_READ_TIMEOUT = 120  # 无数据空闲超时(秒); 慢链路只要还在出字节就不会触发
+
 
 def auto_task(func: Callable[P, Coroutine[Any, Any, T]]) -> Callable[P, Task[T]]:
     """装饰器：自动将异步函数调用转换为 Task, 完整保留类型提示"""
@@ -70,6 +75,12 @@ def is_referer_block(exc: BaseException) -> bool:
     return "HTTP 401" in text or "HTTP 403" in text
 
 
+def range_rejected(exc: BaseException) -> bool:
+    """判断异常是否为 CDN 明确拒绝 Range 请求(400/416)"""
+    text = str(exc)
+    return "HTTP 400" in text or "HTTP 416" in text
+
+
 def cdn_referer(url: str) -> str | None:
     """按目标 CDN 域名匹配兜底 Referer, 未命中返回 None"""
     host = (urlsplit(url).hostname or "").lower()
@@ -91,7 +102,11 @@ class Downloader:
         # 用于流式下载的客户端
         # requote_redirect_url=False: 跳转目标保持原始百分号编码, 避免 CDN 签名被重编码破坏
         self.client = ClientSession(
-            timeout=ClientTimeout(total=self.cfg.download_timeout),
+            timeout=ClientTimeout(
+                total=self.cfg.download_timeout,
+                sock_connect=_SOCK_CONNECT_TIMEOUT,
+                sock_read=_SOCK_READ_TIMEOUT,
+            ),
             requote_redirect_url=False,
         )
 
@@ -108,7 +123,10 @@ class Downloader:
         headers: dict[str, str] | None = None,
         proxy: str | None | object = ...,
     ) -> Path:
-        """流式下载"""
+        """流式下载（支持 HTTP Range 断点续传）"""
+        # 默认值 ... 是「未指定」哨兵, 直接透传给 aiohttp 会 TypeError, 归一成 None
+        if proxy is ...:
+            proxy = None
         if not file_name:
             file_name = generate_file_name(url)
         file_path = self.cfg.cache_dir / file_name
@@ -120,29 +138,69 @@ class Downloader:
         # 必须按原始编码请求: aiohttp 默认用 yarl 解析 URL, 会把查询串里的 %2F/%3D
         # 等转义解开后重编码, 导致 CDN 签名失效(抖音图集等表现为 403)
         request_url = yarl.URL(url, encoded=True)
-        # retries+1 次常规重试, 外加 1 次补 Referer 的防盗链兜底
-        for attempt in range(retries + 2):
+        max_bytes = self.max_size * 1024 * 1024
+        # 先写 .part, 全部收完再原子改名: 半截文件不会被当成缓存命中
+        part_path = file_path.with_name(f"{file_path.name}.part")
+        await safe_unlink(part_path)
+
+        downloaded = 0  # 已落盘字节数, 跨重试累加
+        total: int | None = None  # 服务端声明的完整长度
+        validator: str | None = None  # ETag / Last-Modified, 供 If-Range 校验
+        range_ok = True  # CDN 是否接受 Range 请求
+        stall = 0  # 连续「零进展」次数
+        attempt = 0
+
+        while stall <= retries and attempt < _MAX_ATTEMPTS:
+            attempt += 1
+            req_headers = dict(headers)
+            if downloaded and range_ok:
+                req_headers["Range"] = f"bytes={downloaded}-"
+                if validator:
+                    req_headers["If-Range"] = validator
+            before = downloaded
             try:
                 async with self.client.get(
-                    request_url, headers=headers, allow_redirects=True, proxy=proxy
+                    request_url, headers=req_headers, allow_redirects=True, proxy=proxy
                 ) as response:
                     if response.status >= 400:
                         raise ClientError(f"HTTP {response.status} {response.reason}")
-                    content_length = response.content_length
-                    max_bytes = self.max_size * 1024 * 1024
 
-                    if content_length == 0:
+                    resp_headers = getattr(response, "headers", None) or {}
+
+                    if downloaded and response.status != 206:
+                        # 服务端忽略 Range 或资源已变, 只能从头来
+                        logger.debug(f"服务端未接受 Range, 从头重下 | url: {url}")
+                        downloaded = 0
+                        await safe_unlink(part_path)
+
+                    if response.status == 206:
+                        # Content-Range: bytes 100-999/1000
+                        crange = resp_headers.get("Content-Range", "")
+                        tail = crange.rsplit("/", 1)[-1].strip()
+                        total = int(tail) if tail.isdigit() else None
+                        if total is None and response.content_length is not None:
+                            total = downloaded + response.content_length
+                    else:
+                        total = response.content_length
+                        validator = resp_headers.get("ETag") or resp_headers.get(
+                            "Last-Modified"
+                        )
+
+                    if total == 0:
                         logger.warning(f"媒体 url: {url}, 大小为 0, 取消下载")
                         raise ZeroSizeException
-                    if content_length and content_length > max_bytes:
+                    if total and total > max_bytes:
                         logger.warning(
-                            f"媒体 url: {url} 大小 {content_length / 1024 / 1024:.2f} MB 超过 {self.max_size} MB, 取消下载"
+                            f"媒体 url: {url} 大小 {total / 1024 / 1024:.2f} MB 超过 {self.max_size} MB, 取消下载"
                         )
                         raise SizeLimitException
 
-                    downloaded = 0
-                    with self.get_progress_bar(file_name, content_length) as bar:
-                        async with aiofiles.open(file_path, "wb") as file:
+                    with self.get_progress_bar(
+                        file_name, total, initial=downloaded
+                    ) as bar:
+                        async with aiofiles.open(
+                            part_path, "ab" if downloaded else "wb"
+                        ) as file:
                             async for chunk in response.content.iter_chunked(
                                 1024 * 1024
                             ):
@@ -152,21 +210,26 @@ class Downloader:
                                 await file.write(chunk)
                                 bar.update(len(chunk))
 
-                    if downloaded == 0:
-                        logger.warning(f"媒体 url: {url}, 实际大小为 0, 取消下载")
-                        raise ZeroSizeException
-                    if content_length and downloaded < content_length:
-                        raise ClientError(
-                            f"HTTP payload incomplete {downloaded}/{content_length}"
-                        )
+                if downloaded == 0:
+                    logger.warning(f"媒体 url: {url}, 实际大小为 0, 取消下载")
+                    raise ZeroSizeException
+                if total is not None and downloaded < total:
+                    # 被超时/断流掐断: 抛出后由外层带 Range 续传
+                    raise ClientError(f"HTTP payload incomplete {downloaded}/{total}")
 
+                part_path.replace(file_path)
                 return file_path
+
             except (ZeroSizeException, SizeLimitException):
-                await safe_unlink(file_path)
+                await safe_unlink(part_path)
                 raise
             except (ClientError, TimeoutError) as exc:
-                await safe_unlink(file_path)
-                # 防盗链 CDN 兜底: 未带 Referer 被拦时, 按域名补一个 Referer 再试一次
+                if downloaded > before:
+                    stall = 0  # 本次有进展, 不算卡死
+                else:
+                    stall += 1
+
+                # 1) 防盗链兜底: 未带 Referer 被拦时, 按域名补一个 Referer 再试一次
                 if (
                     "Referer" not in headers
                     and is_referer_block(exc)
@@ -175,26 +238,48 @@ class Downloader:
                     headers = {**headers, "Referer": referer}
                     logger.debug(f"补 Referer 重试 | url: {url} -> {referer}")
                     continue
-                if attempt < retries:
-                    await sleep(1 + attempt)
+
+                # 2) CDN 明确拒绝 Range(400/416), 或补过 Referer 后仍 403: 关掉续传整段重下
+                if range_ok and "Range" in req_headers and (
+                    range_rejected(exc) or is_referer_block(exc)
+                ):
+                    logger.debug(f"CDN 拒绝 Range, 改为整段重下 | url: {url}")
+                    range_ok = False
+                    downloaded = 0
+                    await safe_unlink(part_path)
                     continue
-                logger.exception(f"下载失败 | url: {url}, file_path: {file_path}")
+
+                if stall <= retries and attempt < _MAX_ATTEMPTS:
+                    await sleep(min(1 + stall, 5))
+                    continue
+
+                logger.exception(
+                    f"下载失败 | url: {url}, file_path: {file_path}, "
+                    f"已下载 {downloaded} B, 请求 {attempt} 次"
+                )
+                await safe_unlink(part_path)
                 raise DownloadException("媒体下载失败") from exc
+
+        await safe_unlink(part_path)
         raise DownloadException("媒体下载失败")
 
     @staticmethod
-    def get_progress_bar(desc: str, total: int | None = None) -> tqdm:
+    def get_progress_bar(
+        desc: str, total: int | None = None, initial: int = 0
+    ) -> tqdm:
         """获取进度条 bar
 
         Args:
             desc (str): 描述
             total (int | None): 总大小. Defaults to None.
+            initial (int): 续传时已下载的字节数. Defaults to 0.
 
         Returns:
             tqdm: 进度条
         """
         return tqdm(
             total=total,
+            initial=initial,
             unit="B",
             unit_scale=True,
             unit_divisor=1024,
